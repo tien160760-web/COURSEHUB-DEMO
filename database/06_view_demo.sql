@@ -1,5 +1,3 @@
--- Chay tung buoc tren cung mot tab Query Tool va cung mot ket noi.
--- Khong Commit; buoc cuoi cung se ROLLBACK dang ky thu.
 
 -- Buoc 1: bat dau giao dich.
 BEGIN;

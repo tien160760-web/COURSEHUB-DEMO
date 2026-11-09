@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .database import engine
 from .schemas import EnrollmentCreate
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -333,4 +334,52 @@ def get_section_detail(section_id: str) -> dict[str, object]:
         )
     return dict(row)
 
+@app.get("/enrollment-events")
+def list_enrollment_events(
+    student_id: str | None = Query(
+        default=None,
+        min_length=8,
+        max_length=8,
+    ),
+    event_type: Literal["CREATED", "CANCELLED"] | None = Query(
+        default=None,
+    ),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[dict[str, object]]:
+    sql = """
+        SELECT id, student_id, class_section_id,
+               event_type, source, dataset, occurred_at
+        FROM enrollment_events
+        WHERE 1 = 1
+    """
 
+    parameters: dict[str, object] = {
+        "skip": skip,
+        "limit": limit,
+    }
+
+    if student_id is not None:
+        sql += """
+            AND student_id = :student_id
+        """
+        parameters["student_id"] = student_id
+
+    if event_type is not None:
+        sql += """
+            AND event_type = :event_type
+        """
+        parameters["event_type"] = event_type
+
+    sql += """
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT :limit OFFSET :skip
+    """
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(sql),
+            parameters,
+        ).mappings().all()
+
+    return [dict(row) for row in rows]

@@ -10,19 +10,33 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from .database import engine
 from .schemas import EnrollmentCreate
 from typing import Literal
+from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-title="CourseHub API",
-version="0.4.0",
-description="API thuc hanh Buoi 4 - transaction, locking va hieu nang",
+    title="CourseHub API",
+    version="0.4.0",
+    description="API thuc hanh Buoi 5 - Quan ly dang ky hoc phan",
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
+)
+
 
 @app.get("/")
 def read_root() -> dict[str, str]:
     return {"message": "CourseHub API dang hoat dong"}
-# Kiểm tra các API có kết nối với dữ liệu không 
+
+
+# Kiểm tra các API có kết nối với dữ liệu không
 @app.get("/health")
 def health_check() -> dict[str, str]:
     try:
@@ -35,6 +49,8 @@ def health_check() -> dict[str, str]:
             detail="Khong ket noi duoc co so du lieu",
         ) from exc
     return {"status": "ok", "database": "connected"}
+
+
 # API này dùng để liệt kê danh sách các khóa học. Nó hỗ trợ tìm kiếm theo từ khóa (q) trong mã khóa học hoặc tên khóa học.
 # Nếu không có từ khóa nào được cung cấp, nó sẽ trả về tất cả các khóa học. Kết quả được sắp xếp theo mã khóa học.
 @app.get("/courses")
@@ -52,7 +68,7 @@ def list_courses(
         if not keyword:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tu khoa tim kiem khong duoc rong", 
+                detail="Tu khoa tim kiem khong duoc rong",
             )
         sql += """
             WHERE LOWER(code) LIKE :keyword
@@ -60,12 +76,14 @@ def list_courses(
         """
         parameters["keyword"] = f"%{keyword}%"
     sql += " ORDER BY code"
-    
+
     with engine.connect() as connection:
         rows = connection.execute(text(sql), parameters).mappings().all()
 
     return [dict(row) for row in rows]
-# Lấy thông tin của một khóa học dựa trên mã khóa học. 
+
+
+# Lấy thông tin của một khóa học dựa trên mã khóa học.
 # Nếu khóa học không tồn tại, trả về lỗi 404.
 @app.get("/courses/{course_code}")
 def get_course(course_code: str) -> dict[str, object]:
@@ -75,16 +93,22 @@ def get_course(course_code: str) -> dict[str, object]:
         WHERE code = :course_code
     """
     with engine.connect() as connection:
-        row = connection.execute(
-            text(sql),
-            {"course_code": course_code.upper()},
-        ).mappings().first()
+        row = (
+            connection.execute(
+                text(sql),
+                {"course_code": course_code.upper()},
+            )
+            .mappings()
+            .first()
+        )
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Khong tim thay hoc phan",
-    )
+        )
     return dict(row)
+
+
 # Liệt kê các danh sách lớp học phần.
 # Nếu tham số available_only được đặt là True,
 # chỉ liệt kê các lớp học phần còn chỗ trống.
@@ -99,13 +123,15 @@ def list_sections(
     """
     if available_only:
         sql += " WHERE remaining > 0"
-        
+
     sql += " ORDER BY class_id"
-    
+
     with engine.connect() as connection:
         rows = connection.execute(text(sql)).mappings().all()
     return [dict(row) for row in rows]
-# Liệt kê tất cả các lớp học phần mà một sinh viên đã đăng ký. 
+
+
+# Liệt kê tất cả các lớp học phần mà một sinh viên đã đăng ký.
 # Nếu sinh viên không tồn tại, trả về lỗi 404.
 @app.get("/students/{student_id}/enrollments")
 def list_student_enrollments(student_id: str) -> list[dict[str, object]]:
@@ -124,7 +150,7 @@ def list_student_enrollments(student_id: str) -> list[dict[str, object]]:
         WHERE e.student_id = :student_id
         ORDER BY cs.id
     """
-    
+
     with engine.connect() as connection:
         student = connection.execute(
             text(student_sql),
@@ -135,14 +161,20 @@ def list_student_enrollments(student_id: str) -> list[dict[str, object]]:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Khong tim thay sinh vien",
             )
-        rows = connection.execute(
-            text(enrollment_sql),
-            {"student_id": student_id},
-        ).mappings().all()
+        rows = (
+            connection.execute(
+                text(enrollment_sql),
+                {"student_id": student_id},
+            )
+            .mappings()
+            .all()
+        )
     return [dict(row) for row in rows]
+
+
 # Đăng ký một sinh viên vào một lớp học phần.
-# Nếu sinh viên hoặc lớp học phần không tồn tại, 
-# hoặc nếu sinh viên đã đăng ký lớp học phần đó, 
+# Nếu sinh viên hoặc lớp học phần không tồn tại,
+# hoặc nếu sinh viên đã đăng ký lớp học phần đó,
 # hoặc nếu lớp học phần đã đầy, trả về lỗi 409.
 @app.post(
     "/enrollments",
@@ -193,18 +225,20 @@ def create_enrollment(payload: EnrollmentCreate) -> dict[str, str]:
                     detail="Khong tim thay sinh vien",
                 )
 
-            section = connection.execute(
-                text(lock_section_sql),
-                {"class_section_id": payload.class_section_id},
-            ).mappings().first()
+            section = (
+                connection.execute(
+                    text(lock_section_sql),
+                    {"class_section_id": payload.class_section_id},
+                )
+                .mappings()
+                .first()
+            )
             if section is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Khong tim thay lop hoc phan",
                 )
-            duplicated = connection.execute(
-                text(duplicate_sql), parameters
-            ).first()
+            duplicated = connection.execute(text(duplicate_sql), parameters).first()
             if duplicated is not None:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -235,8 +269,10 @@ def create_enrollment(payload: EnrollmentCreate) -> dict[str, str]:
         "class_section_id": payload.class_section_id,
     }
     # Hủy đăng ký một sinh viên khỏi một lớp học phần.
-    # Nếu sinh viên hoặc lớp học phần không tồn tại, 
+    # Nếu sinh viên hoặc lớp học phần không tồn tại,
     # hoặc nếu sinh viên chưa đăng ký lớp học phần đó, trả về lỗi 404.
+
+
 @app.delete(
     "/enrollments/{student_id}/{class_section_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -276,9 +312,7 @@ def delete_enrollment(student_id: str, class_section_id: str) -> Response:
                 detail="Khong tim thay lop hoc phan",
             )
 
-        deleted = connection.execute(
-            text(delete_sql), parameters
-        ).first()
+        deleted = connection.execute(text(delete_sql), parameters).first()
         if deleted is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -288,7 +322,8 @@ def delete_enrollment(student_id: str, class_section_id: str) -> Response:
         connection.execute(text(event_sql), parameters)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-    
+
+
 @app.get("/lecturers")
 def list_lecturers() -> list[dict[str, object]]:
     sql = """
@@ -300,7 +335,8 @@ def list_lecturers() -> list[dict[str, object]]:
         rows = connection.execute(text(sql)).mappings().all()
     return [dict(row) for row in rows]
 
-# chi tiết một lớp học phần 
+
+# chi tiết một lớp học phần
 @app.get("/sections/{section_id}")
 def get_section_detail(section_id: str) -> dict[str, object]:
     sql = """
@@ -322,10 +358,14 @@ def get_section_detail(section_id: str) -> dict[str, object]:
         WHERE v.class_id = :section_id
     """
     with engine.connect() as connection:
-        row = connection.execute(
-            text(sql),
-            {"section_id": section_id.upper()},
-        ).mappings().first()
+        row = (
+            connection.execute(
+                text(sql),
+                {"section_id": section_id.upper()},
+            )
+            .mappings()
+            .first()
+        )
 
     if row is None:
         raise HTTPException(
@@ -333,6 +373,7 @@ def get_section_detail(section_id: str) -> dict[str, object]:
             detail="Khong tim thay lop hoc phan",
         )
     return dict(row)
+
 
 @app.get("/enrollment-events")
 def list_enrollment_events(
@@ -377,9 +418,13 @@ def list_enrollment_events(
     """
 
     with engine.connect() as connection:
-        rows = connection.execute(
-            text(sql),
-            parameters,
-        ).mappings().all()
+        rows = (
+            connection.execute(
+                text(sql),
+                parameters,
+            )
+            .mappings()
+            .all()
+        )
 
     return [dict(row) for row in rows]
